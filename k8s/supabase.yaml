@@ -1,0 +1,557 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: supabase
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: supabase-secrets
+  namespace: supabase
+stringData:
+  # Fill these in securely before applying
+  JWT_SECRET: "replace-with-strong-jwt-secret"
+  ANON_KEY: "replace-with-generated-anon-jwt"
+  SERVICE_ROLE_KEY: "replace-with-generated-service-role-jwt"
+  GOTRUE_JWT_SECRET: "replace-with-strong-gotrue-jwt-secret"
+  ADMIN_EMAIL: "admin@example.com"
+  ADMIN_PASSWORD: "set-a-strong-password"
+  # External Postgres connection
+  POSTGRES_HOST: "10.0.0.10" # replace with your Postgres IP
+  POSTGRES_DB: "postgres"
+  POSTGRES_USER: "postgres"
+  POSTGRES_PASSWORD: "example-password"
+  POSTGRES_PORT: "5432"
+  # Full connection URL for clients that need DSN (includes sslmode=disable by default)
+  POSTGRES_URL: "postgresql://postgres:example-password@10.0.0.10:5432/postgres?sslmode=disable"
+  # URLs
+  SITE_URL: "https://your-domain.example.com"
+  API_EXTERNAL_URL: "https://api.your-domain.example.com"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gotrue
+  namespace: supabase
+spec:
+  selector:
+    app: gotrue
+  ports:
+    - name: http
+      port: 9999
+      targetPort: 9999
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gotrue
+  namespace: supabase
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gotrue
+  template:
+    metadata:
+      labels:
+        app: gotrue
+    spec:
+      containers:
+        - name: gotrue
+          image: supabase/gotrue:v2.164.2
+          env:
+            - name: GOTRUE_API_HOST
+              value: "0.0.0.0"
+            - name: PORT
+              value: "9999"
+            - name: GOTRUE_SITE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: SITE_URL
+            - name: GOTRUE_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: GOTRUE_JWT_SECRET
+            - name: GOTRUE_DB_DRIVER
+              value: "postgres"
+            - name: GOTRUE_DB_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: POSTGRES_URL
+            - name: GOTRUE_ANON_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: ANON_KEY
+            - name: GOTRUE_JWT_DEFAULT_GROUP_NAME
+              value: "authenticated"
+            - name: GOTRUE_DISABLE_SIGNUP
+              value: "false"
+            - name: GOTRUE_EXTERNAL_EMAIL_ENABLED
+              value: "true"
+            - name: GOTRUE_SMTP_HOST
+              value: "smtp"
+            - name: GOTRUE_SMTP_PORT
+              value: "587"
+            - name: GOTRUE_SMTP_USER
+              value: "user"
+            - name: GOTRUE_SMTP_PASS
+              value: "password"
+          ports:
+            - containerPort: 9999
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgrest
+  namespace: supabase
+spec:
+  selector:
+    app: postgrest
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgrest
+  namespace: supabase
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgrest
+  template:
+    metadata:
+      labels:
+        app: postgrest
+    spec:
+      containers:
+        - name: postgrest
+          image: postgrest/postgrest:v12.2.3
+          env:
+            - name: PGRST_DB_URI
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: POSTGRES_URL
+            - name: PGRST_DB_SCHEMAS
+              value: "public, storage, graphql_public"
+            - name: PGRST_DB_ANON_ROLE
+              value: "anon"
+            - name: PGRST_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: JWT_SECRET
+            - name: PGRST_DB_USE_LEGACY_GUCS
+              value: "false"
+          ports:
+            - containerPort: 3000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: realtime
+  namespace: supabase
+spec:
+  selector:
+    app: realtime
+  ports:
+    - name: http
+      port: 4000
+      targetPort: 4000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: realtime
+  namespace: supabase
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: realtime
+  template:
+    metadata:
+      labels:
+        app: realtime
+    spec:
+      containers:
+        - name: realtime
+          image: supabase/realtime:v2.25.46
+          env:
+            - name: PORT
+              value: "4000"
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: POSTGRES_HOST
+            - name: DB_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: POSTGRES_PORT
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: POSTGRES_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: POSTGRES_PASSWORD
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: POSTGRES_DB
+            - name: DB_ENCRYPTION
+              value: "disable"
+            - name: REPLICATION_MODE
+              value: "logical"
+            - name: SECURE_CHANNELS
+              value: "false"
+          ports:
+            - containerPort: 4000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: storage
+  namespace: supabase
+spec:
+  selector:
+    app: storage
+  ports:
+    - name: http
+      port: 5000
+      targetPort: 5000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: storage
+  namespace: supabase
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: storage
+  template:
+    metadata:
+      labels:
+        app: storage
+    spec:
+      containers:
+        - name: storage
+          image: supabase/storage-api:v1.0.7
+          env:
+            - name: ANON_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: ANON_KEY
+            - name: SERVICE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: SERVICE_ROLE_KEY
+            - name: POSTGREST_URL
+              value: "http://postgrest:3000"
+            - name: PGRST_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: JWT_SECRET
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: POSTGRES_URL
+            - name: REGION
+              value: "local"
+          ports:
+            - containerPort: 5000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: imgproxy
+  namespace: supabase
+spec:
+  selector:
+    app: imgproxy
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: imgproxy
+  namespace: supabase
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: imgproxy
+  template:
+    metadata:
+      labels:
+        app: imgproxy
+    spec:
+      containers:
+        - name: imgproxy
+          image: darthsim/imgproxy:v3.21
+          env:
+            - name: IMGPROXY_LOCAL_FILESYSTEM_ROOT
+              value: "/"
+            - name: IMGPROXY_USE_ETAG
+              value: "true"
+          ports:
+            - containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: studio
+  namespace: supabase
+spec:
+  selector:
+    app: studio
+  ports:
+    - name: http
+      port: 3001
+      targetPort: 3000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: studio
+  namespace: supabase
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: studio
+  template:
+    metadata:
+      labels:
+        app: studio
+    spec:
+      containers:
+        - name: studio
+          image: supabase/studio:20240514-2b3532f
+          env:
+            - name: STUDIO_PG_META_URL
+              value: "http://pgmeta:8080"
+            - name: SUPABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: API_EXTERNAL_URL
+            - name: SUPABASE_ANON_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: ANON_KEY
+          ports:
+            - containerPort: 3000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pgmeta
+  namespace: supabase
+spec:
+  selector:
+    app: pgmeta
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pgmeta
+  namespace: supabase
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pgmeta
+  template:
+    metadata:
+      labels:
+        app: pgmeta
+    spec:
+      containers:
+        - name: pgmeta
+          image: supabase/pg-meta:v0.80.0
+          env:
+            - name: PG_META_PORT
+              value: "8080"
+            - name: PG_META_DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: POSTGRES_HOST
+            - name: PG_META_DB_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: POSTGRES_PORT
+            - name: PG_META_DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: POSTGRES_DB
+            - name: PG_META_DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: POSTGRES_USER
+            - name: PG_META_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: POSTGRES_PASSWORD
+          ports:
+            - containerPort: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: supabase-ingress
+  namespace: supabase
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /$1
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  rules:
+    - host: api.your-domain.example.com
+      http:
+        paths:
+          - path: /auth/v1/?(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: gotrue
+                port:
+                  number: 9999
+          - path: /rest/v1/?(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: postgrest
+                port:
+                  number: 3000
+          - path: /realtime/v1/?(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: realtime
+                port:
+                  number: 4000
+          - path: /storage/v1/?(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: storage
+                port:
+                  number: 5000
+          - path: /pg/?(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: pgmeta
+                port:
+                  number: 8080
+    - host: studio.your-domain.example.com
+      http:
+        paths:
+          - path: /(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: studio
+                port:
+                  number: 3001
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: supabase-db-bootstrap
+  namespace: supabase
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: db-bootstrap
+          image: alpine:3.20
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: POSTGRES_PASSWORD
+            - name: PGHOST
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: POSTGRES_HOST
+            - name: PGPORT
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: POSTGRES_PORT
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: POSTGRES_USER
+            - name: PGDATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: POSTGRES_DB
+            - name: PGSSLMODE
+              value: "disable"
+          command:
+            - /bin/sh
+            - -lc
+            - |
+              set -euo pipefail
+              apk add --no-cache curl ca-certificates bash git postgresql-client
+              echo "Checking for existing Supabase schema (auth)..."
+              if psql -tAc "SELECT 1 FROM pg_namespace WHERE nspname='auth'" | grep -q 1; then
+                echo "Auth schema exists. Skipping bootstrap."
+                exit 0
+              fi
+              echo "Auth schema missing. Applying Supabase SQL bootstrap files..."
+              WORKDIR=/tmp/supabase
+              mkdir -p "$WORKDIR"
+              cd "$WORKDIR"
+              git clone --depth 1 https://github.com/supabase/supabase.git
+              cd supabase/docker
+              # Apply SQLs similar to docker-compose init
+              for f in $(find ./volumes/db/init -type f -name '*.sql' | sort); do
+                echo "Running $f"
+                psql -v ON_ERROR_STOP=1 -f "$f"
+              done
