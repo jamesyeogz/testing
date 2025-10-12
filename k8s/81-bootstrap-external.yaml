@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: supabase-db-bootstrap
+  name: supabase-db-bootstrap-external
   namespace: supabase
 spec:
   backoffLimit: 3
@@ -11,8 +11,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: db-bootstrap
-          # Use supabase/postgres image to leverage included SQL
-          image: supabase/postgres:15.8.1.085
+          image: alpine:3.20
           env:
             - name: PGPASSWORD
               valueFrom:
@@ -49,57 +48,33 @@ spec:
                 secretKeyRef:
                   name: supabase-secrets
                   key: POSTGRES_DB
-            - name: PGSSLMODE
-              value: "disable"
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:
                   name: supabase-secrets
                   key: JWT_SECRET
             - name: JWT_EXP
-              valueFrom:
-                secretKeyRef:
-                  name: supabase-secrets
-                  key: JWT_EXP
+              value: "3600"
           command:
-            - /bin/bash
+            - /bin/sh
             - -lc
             - |
               set -euo pipefail
-              echo "Checking for existing Supabase schema (auth)..."
-              if psql -tAc "SELECT 1 FROM pg_namespace WHERE nspname='auth'" | grep -q 1; then
-                echo "Auth schema exists. Skipping bootstrap."
-                exit 0
-              fi
-              echo "Auth schema missing. Applying Supabase base migrations (image) then overlay (ConfigMaps)..."
-              base_init="/docker-entrypoint-initdb.d/init-scripts"
-              base_migs="/docker-entrypoint-initdb.d/migrations"
-              # 1) Run base init-scripts (if present)
-              if [ -d "$base_init" ]; then
-                echo "Running base init-scripts..."
-                for f in $(ls "$base_init"/*.sql 2>/dev/null | sort); do
-                  echo "Running $f"; psql -v ON_ERROR_STOP=1 -f "$f" postgres; done
-              fi
-              # 2) Run base migrations (if present)
-              if [ -d "$base_migs" ]; then
-                echo "Running base migrations..."
-                for f in $(ls "$base_migs"/*.sql 2>/dev/null | sort); do
-                  echo "Running $f"; psql -v ON_ERROR_STOP=1 -f "$f" postgres; done
-              fi
-              # 3) Run overlay init-scripts from ConfigMap
+              apk add --no-cache curl ca-certificates bash postgresql-client
+              echo "Applying Supabase SQL overlay from ConfigMaps (idempotent)..."
+              # Apply init-scripts first (webhooks, roles, jwt)
               for f in /cm/init-scripts/*.sql; do
                 [ -f "$f" ] || continue
                 echo "Running $f"; psql -v ON_ERROR_STOP=1 -f "$f" postgres || true; done
-              # 4) Run overlay migrations from ConfigMap
+              # Create _supabase and schemas, then realtime/logs/pooler migrations
               for f in /cm/migrations/*.sql; do
                 [ -f "$f" ] || continue
                 echo "Running $f"; psql -v ON_ERROR_STOP=1 -f "$f" postgres || true; done
               echo "Verifying auth schema exists..."
               if ! psql -tAc "SELECT 1 FROM pg_namespace WHERE nspname='auth'" | grep -q 1; then
-                echo "ERROR: auth schema still missing after migrations" >&2
+                echo "ERROR: auth schema still missing after overlay" >&2
                 exit 1
               fi
-              echo "Bootstrap complete."
           volumeMounts:
             - name: init-scripts
               mountPath: /cm/init-scripts
