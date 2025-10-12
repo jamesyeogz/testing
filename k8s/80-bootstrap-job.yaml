@@ -1,0 +1,72 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: supabase-db-bootstrap
+  namespace: supabase
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: db-bootstrap
+          # Use supabase/postgres image to leverage included SQL
+          image: supabase/postgres:15.1.0.111
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: POSTGRES_PASSWORD
+            - name: PGHOST
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: POSTGRES_HOST
+            - name: PGPORT
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: POSTGRES_PORT
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: POSTGRES_USER
+            - name: PGDATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: POSTGRES_DB
+            - name: PGSSLMODE
+              value: "disable"
+          command:
+            - /bin/bash
+            - -lc
+            - |
+              set -euo pipefail
+              echo "Checking for existing Supabase schema (auth)..."
+              if psql -tAc "SELECT 1 FROM pg_namespace WHERE nspname='auth'" | grep -q 1; then
+                echo "Auth schema exists. Skipping bootstrap."
+                exit 0
+              fi
+              echo "Auth schema missing. Applying Supabase SQL from supabase/postgres image..."
+              # The image contains SQL under /docker-entrypoint-initdb.d and /etc/postgresql-custom
+              SQL_DIRS=(
+                /docker-entrypoint-initdb.d
+                /etc/postgresql-custom
+              )
+              for dir in "${SQL_DIRS[@]}"; do
+                if [ -d "$dir" ]; then
+                  echo "Applying SQL directory: $dir"
+                  find "$dir" -type f -name '*.sql' -o -name '*.sql.gz' | sort | while read -r f; do
+                    echo "Running $f"
+                    case "$f" in
+                      *.sql) psql -v ON_ERROR_STOP=1 -f "$f" ;;
+                      *.sql.gz) gzip -dc "$f" | psql -v ON_ERROR_STOP=1 ;;
+                    esac
+                  done
+                fi
+              done
+              echo "Bootstrap complete."

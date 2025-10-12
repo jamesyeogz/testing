@@ -1,0 +1,61 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: supabase-ingress
+  namespace: supabase
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /$1
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  rules:
+    - host: api.your-domain.example.com
+      http:
+        paths:
+          - path: /auth/v1/?(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: gotrue
+                port:
+                  number: 9999
+          - path: /rest/v1/?(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: postgrest
+                port:
+                  number: 3000
+          - path: /realtime/v1/?(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: realtime
+                port:
+                  number: 4000
+          - path: /storage/v1/?(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: storage
+                port:
+                  number: 5000
+          - path: /pg/?(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: pgmeta
+                port:
+                  number: 8080
+    - host: studio.your-domain.example.com
+      http:
+        paths:
+          - path: /(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: studio
+                port:
+                  number: 3001
