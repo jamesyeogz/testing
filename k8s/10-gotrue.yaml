@@ -50,7 +50,7 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: supabase-secrets
-                  key: POSTGRES_URL
+                  key: AUTH_DB_URL
             - name: GOTRUE_ANON_KEY
               valueFrom:
                 secretKeyRef:

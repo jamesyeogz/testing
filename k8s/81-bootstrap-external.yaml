@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: supabase-db-bootstrap-external
+  name: supabase-db-bootstrap
   namespace: supabase
 spec:
   backoffLimit: 3
@@ -11,6 +11,17 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: db-bootstrap
+          # PURPOSE
+          # - One-shot Job that safely initializes an EXISTING external Postgres with the
+          #   SQL required by Supabase (roles, schemas, extensions, settings).
+          # - Idempotent: running it again will not break a database that is already
+          #   initialized.
+          # - REQUIRED when your Postgres is new/empty. If your DB already has the Supabase
+          #   roles/schemas, you can skip running this after the first successful run.
+          # HOW IT WORKS
+          # - Applies the same SQL the official docker-compose mounts (from ConfigMaps).
+          # - Verifies that the 'auth' schema exists afterward.
+          # - Exits non-zero if 'auth' is still missing, so you can see errors in logs.
           image: alpine:3.20
           env:
             - name: PGPASSWORD

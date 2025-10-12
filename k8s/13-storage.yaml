@@ -51,7 +51,7 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: supabase-secrets
-                  key: POSTGRES_URL
+                  key: STORAGE_DB_URL
             - name: REGION
               value: "local"
           ports:

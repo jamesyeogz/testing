@@ -34,7 +34,7 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: supabase-secrets
-                  key: POSTGRES_URL
+                  key: REST_DB_URI
             - name: PGRST_DB_SCHEMAS
               value: "public, storage, graphql_public"
             - name: PGRST_DB_ANON_ROLE
