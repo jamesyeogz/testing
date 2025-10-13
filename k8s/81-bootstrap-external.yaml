@@ -1,0 +1,100 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: supabase-db-bootstrap
+  namespace: supabase
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: db-bootstrap
+          # PURPOSE
+          # - One-shot Job that safely initializes an EXISTING external Postgres with the
+          #   SQL required by Supabase (roles, schemas, extensions, settings).
+          # - Idempotent: running it again will not break a database that is already
+          #   initialized.
+          # - REQUIRED when your Postgres is new/empty. If your DB already has the Supabase
+          #   roles/schemas, you can skip running this after the first successful run.
+          # HOW IT WORKS
+          # - Applies the same SQL the official docker-compose mounts (from ConfigMaps).
+          # - Verifies that the 'auth' schema exists afterward.
+          # - Exits non-zero if 'auth' is still missing, so you can see errors in logs.
+          image: alpine:3.20
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: POSTGRES_PASSWORD
+            - name: PGHOST
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: POSTGRES_HOST
+            - name: PGPORT
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: POSTGRES_PORT
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: POSTGRES_USER
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: POSTGRES_USER
+            - name: PGDATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: POSTGRES_DB
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: JWT_SECRET
+            - name: JWT_EXP
+              value: "3600"
+          command:
+            - /bin/sh
+            - -lc
+            - |
+              set -euo pipefail
+              apk add --no-cache curl ca-certificates bash postgresql-client
+              echo "Applying Supabase SQL overlay from ConfigMaps (idempotent)..."
+              # Apply init-scripts first (webhooks, roles, jwt)
+              for f in /cm/init-scripts/*.sql; do
+                [ -f "$f" ] || continue
+                echo "Running $f"; psql -v ON_ERROR_STOP=1 -f "$f" postgres || true; done
+              # Create _supabase and schemas, then realtime/logs/pooler migrations
+              for f in /cm/migrations/*.sql; do
+                [ -f "$f" ] || continue
+                echo "Running $f"; psql -v ON_ERROR_STOP=1 -f "$f" postgres || true; done
+              echo "Verifying auth schema exists..."
+              if ! psql -tAc "SELECT 1 FROM pg_namespace WHERE nspname='auth'" | grep -q 1; then
+                echo "ERROR: auth schema still missing after overlay" >&2
+                exit 1
+              fi
+          volumeMounts:
+            - name: init-scripts
+              mountPath: /cm/init-scripts
+            - name: migrations
+              mountPath: /cm/migrations
+      volumes:
+        - name: init-scripts
+          configMap:
+            name: supabase-db-init-scripts
+        - name: migrations
+          configMap:
+            name: supabase-db-migrations

@@ -1,0 +1,114 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: supabase-pg-backup
+  namespace: supabase
+spec:
+  # Daily at 02:15 UTC
+  schedule: "15 2 * * *"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: backup
+              image: alpine:3.20
+              env:
+                - name: PGHOST
+                  valueFrom:
+                    secretKeyRef:
+                      name: supabase-secrets
+                      key: POSTGRES_HOST
+                - name: PGPORT
+                  valueFrom:
+                    secretKeyRef:
+                      name: supabase-secrets
+                      key: POSTGRES_PORT
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef:
+                      name: supabase-secrets
+                      key: POSTGRES_USER
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: supabase-secrets
+                      key: POSTGRES_PASSWORD
+                - name: PGDATABASE
+                  valueFrom:
+                    secretKeyRef:
+                      name: supabase-secrets
+                      key: POSTGRES_DB
+                # Optional: S3 backup; set BUCKET like s3://bucket/path
+                - name: BUCKET
+                  value: ""
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: supabase-secrets
+                      key: AWS_ACCESS_KEY_ID
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: supabase-secrets
+                      key: AWS_SECRET_ACCESS_KEY
+                - name: AWS_REGION
+                  valueFrom:
+                    secretKeyRef:
+                      name: supabase-secrets
+                      key: AWS_REGION
+                # Optional: SSH offsite copy
+                - name: BACKUP_SSH_HOST
+                  valueFrom:
+                    secretKeyRef:
+                      name: supabase-secrets
+                      key: BACKUP_SSH_HOST
+                - name: BACKUP_SSH_USER
+                  valueFrom:
+                    secretKeyRef:
+                      name: supabase-secrets
+                      key: BACKUP_SSH_USER
+                - name: BACKUP_SSH_PATH
+                  valueFrom:
+                    secretKeyRef:
+                      name: supabase-secrets
+                      key: BACKUP_SSH_PATH
+                - name: BACKUP_SSH_PORT
+                  valueFrom:
+                    secretKeyRef:
+                      name: supabase-secrets
+                      key: BACKUP_SSH_PORT
+              command:
+                - /bin/sh
+                - -lc
+                - |
+                  set -euo pipefail
+                  apk add --no-cache postgresql-client ca-certificates tzdata curl bash openssh-client gzip tar aws-cli
+                  TS=$(date -u +%Y%m%dT%H%M%SZ)
+                  DUMP=/backups/pgdump-${PGDATABASE}-${TS}.sql.gz
+                  echo "Dumping ${PGDATABASE} to ${DUMP}"
+                  pg_dump -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" --no-owner --no-privileges | gzip -9 > "$DUMP"
+                  ls -lh "$DUMP"
+                  # Optional upload to S3-compatible storage if BUCKET set
+                  if [ -n "${BUCKET:-}" ]; then
+                    echo "Uploading to $BUCKET"
+                    aws s3 cp "$DUMP" "$BUCKET/" --only-show-errors
+                  fi
+                  # Optional SCP to offsite host if BACKUP_SSH_HOST set
+                  if [ -n "${BACKUP_SSH_HOST:-}" ]; then
+                    echo "Copying to ${BACKUP_SSH_HOST}:${BACKUP_SSH_PATH}"
+                    ssh -p "${BACKUP_SSH_PORT:-22}" -o StrictHostKeyChecking=no "${BACKUP_SSH_USER:-root}@${BACKUP_SSH_HOST}" "mkdir -p '${BACKUP_SSH_PATH}'"
+                    scp -P "${BACKUP_SSH_PORT:-22}" -o StrictHostKeyChecking=no "$DUMP" "${BACKUP_SSH_USER:-root}@${BACKUP_SSH_HOST}:${BACKUP_SSH_PATH}/"
+                  fi
+                  echo "Backup complete"
+              volumeMounts:
+                - name: backups
+                  mountPath: /backups
+          volumes:
+            - name: backups
+              persistentVolumeClaim:
+                claimName: supabase-backups

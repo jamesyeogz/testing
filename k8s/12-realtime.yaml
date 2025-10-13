@@ -1,0 +1,67 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: realtime
+  namespace: supabase
+spec:
+  selector:
+    app: realtime
+  ports:
+    - name: http
+      port: 4000
+      targetPort: 4000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: realtime
+  namespace: supabase
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: realtime
+  template:
+    metadata:
+      labels:
+        app: realtime
+    spec:
+      containers:
+        - name: realtime
+          image: supabase/realtime:v2.25.46
+          env:
+            - name: PORT
+              value: "4000"
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: POSTGRES_HOST
+            - name: DB_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: POSTGRES_PORT
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: POSTGRES_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: POSTGRES_PASSWORD
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: POSTGRES_DB
+            - name: DB_ENCRYPTION
+              value: "disable"
+            - name: REPLICATION_MODE
+              value: "logical"
+            - name: SECURE_CHANNELS
+              value: "false"
+          ports:
+            - containerPort: 4000
